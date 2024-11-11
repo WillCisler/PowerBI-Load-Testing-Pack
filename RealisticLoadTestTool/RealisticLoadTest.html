@@ -1,15 +1,10 @@
 <!DOCTYPE html>
 
 <html lang="en">
-
 	<head>
-
 		<style>
-
 			body {
-
-				font-family: 'Segoe UI';
-
+				font-family: "Segoe UI";
 			}
 		</style>
 
@@ -30,42 +25,19 @@
 		<script type="text/javascript" src="PBIReport.json"></script>
 
 		<script>
-
 			var startTime = new Date();
-
-			//TODO: provide your PBIE token; it will be valid for 60 min only!
-
-			//1. Install Power BI PowerShell module https://docs.microsoft.com/en-us/powershell/power-bi/overview?view=powerbi-ps
-
-			//2. Login into Power BI with your test identity account credentials using Login-PowerBI command
-
-			//3. Put PBIE token on clipboard: Get-PowerBIAccessToken -AsString | % {$_.replace("Bearer ","").Trim()} | clip
-
-			//4. Paste PBIE token value in JSON file; remove 'Bearer ' from the beginning of the string if present
-
-			//var PBIEtoken = "";
 
 			var PBIEtoken = JSON
 				.parse(accessToken)
 				.PBIToken;
 
-			//TODO: replace with your report embed URL in the JSON file
-
-			//Get proper report embed URL using PS: Get-PowerBIReport -Id [report GUID] -WorkspaceId [workspace GUID] | Select -ExpandProperty EmbedUrl | Clip
-
-			//var embedUrl = 'https://app.powerbi.com/reportEmbed?reportId=b14f6f29-c5a0-407a-ae06-5c1ae8642285&groupId=7bbb6481-4081-4b0e-97d8-b5085dbb85f4';
-
 			var embedUrl = reportParameters.reportUrl;
-
-			//TODO: replace with the seed filter value for your specific report filter
 
 			var filterStart = reportParameters.filterStart;
 
 			var filterValue = filterStart;
 
 			var filterMax = reportParameters.filterMax;
-
-			//var filterTable = reportParameters.filterTable;
 
 			var filtersList = Array(0);
 			if (reportParameters.filters != undefined) {
@@ -101,15 +73,16 @@
 									.filterColumn
 							},
 							operator: "In",
-							values: (
-								v != null
-								? (
-									Array.isArray(v)
+							values: v != null
+								? Array.isArray(v)
 									? v
-									: [v])
-								: reportParameters.filters[j].filtersList.filter(function (a) {
-									return a != null;
-								})),
+									: [v]
+								: reportParameters
+									.filters[j]
+									.filtersList
+									.filter(function (a) {
+										return a != null;
+									}),
 							filterType: 1
 						};
 
@@ -138,15 +111,16 @@
 												.filterColumn
 										},
 										operator: "In",
-										values: (
-											v != null
-											? (
-												Array.isArray(v)
+										values: v != null
+											? Array.isArray(v)
 												? v
-												: [v])
-											: reportParameters.filters[j].filtersList.filter(function (a) {
-												return a != null;
-											}))
+												: [v]
+											: reportParameters
+												.filters[j]
+												.filtersList
+												.filter(function (a) {
+													return a != null;
+												})
 									}
 								]
 							}
@@ -160,7 +134,6 @@
 							filtersList[i]
 								.filters
 								.push(filter);
-
 						}
 					for (var z = reportParameters.filters.length - 1; z >= 0; z--) {
 						if (arrFilterCounter[z] + 1 < reportParameters.filters[z].filtersList.length) {
@@ -170,7 +143,6 @@
 							arrFilterCounter[z] = 0;
 						}
 					}
-
 				}
 			}
 
@@ -198,56 +170,38 @@
 				bookmarkList = [""];
 			}
 
-			//var filterColumn = reportParameters.filterColumn;
-
 			var thinkTimeSeconds = reportParameters.thinkTimeSeconds;
-			thinkTimeSeconds = (
-				thinkTimeSeconds == null
+			thinkTimeSeconds = thinkTimeSeconds == null
 				? 0
-				: thinkTimeSeconds);
+				: thinkTimeSeconds;
 
 			var pageName = reportParameters.pageName;
-			pageName = (
-				pageName == undefined
+			pageName = pageName == undefined
 				? null
-				: pageName);
+				: pageName;
 
 			var layoutType = reportParameters.layoutType;
-			layoutType = (
-				layoutType == undefined
+			layoutType = layoutType == undefined
 				? "Master"
-				: layoutType);
+				: layoutType;
 
-			//var isSlicer = reportParameters.isSlicer;
-			//isSlicer = (isSlicer == undefined ? false : isSlicer);
-
-			//TODO: adjust this value in the JSON file based on the complexity of your report; helps free up clogged browser resources
-
-			var sessionRestart = reportParameters.sessionRestart; //NOTE: added to address hard to identify long-running session memory leak
-
+			var sessionRestart = reportParameters.sessionRestart;
 			var reportId = GetQSParam("reportId", embedUrl);
 
-			//preserving total report render count to support session restart flow
-
-			var loadCounter = sessionStorage.getItem('reloadCounter') === null
+			var loadCounter = sessionStorage.getItem("reloadCounter") === null
 				? 0
-				: sessionStorage.getItem('reloadCounter');
+				: sessionStorage.getItem("reloadCounter");
 
-			startTime = (
-				sessionStorage.getItem('originalStartTime') === null
+			startTime = sessionStorage.getItem("originalStartTime") === null
 				? startTime
-				: new Date(sessionStorage.getItem('originalStartTime')));
+				: new Date(sessionStorage.getItem("originalStartTime"));
 
 			var errorTracker = "";
 
 			var report;
-
-			var lastRefreshTime = new Date(); // Initialize with the current time
-
-			//added by SergeiG 5/4/2018 to embed a report
+			var lastRefreshTime = new Date();
 
 			function EmbedReport() {
-
 				if (errorTracker.length != 0) 
 					return;
 				
@@ -255,35 +209,23 @@
 					report.off("rendered");
 				
 				if (loadCounter > 0) {
-					var divCounter = document.getElementById('LoadReportCounter');
+					var divCounter = document.getElementById("LoadReportCounter");
 
-					var avgDuration = Math.round(((((new Date()) - startTime) - (thinkTimeSeconds * loadCounter * 1000)) / loadCounter)) / 1000;
-					divCounter.innerHTML = loadCounter + " refreshes<br/>" + avgDuration + " seconds average refresh time<br/>" + thinkTimeSeconds + " seconds think time" + bookmarkCounter + " bookmarks<br/>";
+					var avgDuration = Math.round((new Date() - startTime - thinkTimeSeconds * loadCounter * 1000) / loadCounter) / 1000;
+					var currentTime = new Date();
+					var lastRefreshDuration = Math.round(currentTime - lastRefreshTime) / 1000;
+					var timestamp = currentTime.toLocaleString();
+
+					divCounter.innerHTML = loadCounter + " refreshes<br/>" + avgDuration + " seconds average refresh time<br/>" + thinkTimeSeconds + " seconds think time<br/>" + lastRefreshDuration + " Last refresh duration";
 				}
 
 				// Get models (models contains enums)
 
-				var models = window['powerbi-client'].models;
+				var models = window["powerbi-client"].models;
 
 				var filterCounter = Math.floor(loadCounter / bookmarkList.length) % filtersCount;
 				var bookmarkCounter = loadCounter % bookmarkList.length;
 				var bookmarkValue = bookmarkList[bookmarkCounter];
-				// Add code to show the last refresh duration and its timestamp
-				var currentTime = new Date();
-				var lastRefreshDuration = Math.round((currentTime - lastRefreshTime) / 1000);
-				var timestamp = currentTime.toLocaleString();
-				var divLastRefresh = document.getElementById('LastRefreshInfo');
-				if (!divLastRefresh) {
-					divLastRefresh = document.createElement('div');
-					divLastRefresh.id = 'LastRefreshInfo';
-					document
-						.body
-						.appendChild(divLastRefresh);
-				}
-				divLastRefresh.innerHTML = "Last refresh duration: " + lastRefreshDuration + " seconds<br/>" + "Timestamp: " + timestamp;
-
-				// Update the last refresh time to the current time
-				lastRefreshTime = currentTime;
 				if (filtersList != null) {
 					if (isNaN(filterCounter)) {
 						filterValue = {
@@ -293,7 +235,8 @@
 					} else {
 						filterValue = filtersList[filterCounter];
 					}
-				} else if (bookmarkCounter == 0) { //only increment the next filter value when we are at the first bookmark
+				} else if (bookmarkCounter == 0) {
+					//only increment the next filter value when we are at the first bookmark
 					filterValue = filterValue < filterMax
 						? ++filterValue
 						: filterStart;
@@ -314,8 +257,7 @@
 				// See java script documentation on GitHub for settings value details
 
 				var config = {
-
-					type: 'report',
+					type: "report",
 
 					tokenType: models.TokenType.Aad,
 
@@ -334,15 +276,12 @@
 					},
 
 					settings: {
-
 						filterPaneEnabled: true,
 
 						navContentPaneEnabled: true,
 
 						layoutType: models.LayoutType[layoutType]
-
 					}
-
 				};
 
 				// Embed the report within the div element
@@ -355,8 +294,7 @@
 				//handling report load error
 
 				report.on("error", function (event) {
-
-					var divCounter = document.getElementById('LoadReportCounter');
+					var divCounter = document.getElementById("LoadReportCounter");
 
 					var currentTime = new Date().toTimeString();
 
@@ -367,11 +305,10 @@
 					//setting error tracker to stop the execution
 
 					errorTracker = event.detail.message;
-
 				});
 
 				report.on("rendered", function () {
-					setTimeout("EmbedReport()", thinkTimeSeconds * 1000)
+					setTimeout("EmbedReport()", thinkTimeSeconds * 1000);
 				});
 
 				if (justFlipBookmark) {
@@ -395,6 +332,8 @@
 				//display counter
 
 				loadCounter++;
+				// Update the last refresh time to the current time
+				lastRefreshTime = currentTime;
 
 				/*
             var divCounter = document.getElementById('LoadReportCounter');
@@ -408,15 +347,12 @@
 
 				//NOTE: added 5/25/19 to see if helps address session memory leak issue
 
-				if ((loadCounter % sessionRestart) === 0) {
-
-					sessionStorage.setItem('reloadCounter', loadCounter);
-					sessionStorage.setItem('originalStartTime', startTime);
+				if (loadCounter % sessionRestart === 0) {
+					sessionStorage.setItem("reloadCounter", loadCounter);
+					sessionStorage.setItem("originalStartTime", startTime);
 
 					location.reload(false);
-
-				};
-
+				}
 			}
 
 			//NOTE: can use report.reload() or report.refresh()
@@ -426,26 +362,20 @@
 			//NOTE: helper function to extract qs parameter by name
 
 			function GetQSParam(name, url) {
-
-				var results = new RegExp('[\?&]' + name + '=([^&#]*)').exec(url);
+				var results = new RegExp("[\?&]" + name + "=([^&#]*)").exec(url);
 
 				if (results == null) {
-
 					return 0;
-
 				}
 
 				return results[1] || 0;
-
 			}
 
 			//END REGION: helper functions
 		</script>
-
 	</head>
 
 	<body>
-
 		<div id="LoadReportCounter">0</div>
 
 		<!--
@@ -456,14 +386,12 @@
     <textarea id="ADALToken" wrap="soft" rows="3" readonly style="width:99%;resize:vertical;" visible=0></textarea>
 	-->
 
-		<hr style="width:99%;"/>
+		<hr style="width: 99%"/>
 
-		<div id="embedDiv" style="height: 800px; width: 100%; max-width: 1200px;" ></div>
-
+		<div id="embedDiv" style="height: 800px; width: 100%; max-width: 1200px"></div>
 	</body>
 
 	<script>
-
 		//NOTE: modified 5/20/19 to address browser flooding when running refresh on timer
 
 		//kicking off report refresh loop based on report render event, i.e., not before
@@ -473,5 +401,4 @@
 		if (report == undefined) 
 			EmbedReport();
 	</script>
-
 </html>

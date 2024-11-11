@@ -1,0 +1,343 @@
+trigger: none            # This can be configured to automate the deployment with CI/CD.
+
+pool:
+  name: 'Azure Pipelines'   # Insert the self-hosted agent pool name.
+
+variables:
+#===================================================================================# 
+#   Insert data from Request Form in each variable that applies.                    #
+#===================================================================================# 
+
+  projectname:                'Beazley-Demo'
+  capacityname:               'a1premium'
+  Workspace_access_to:        'admin@MngEnv789898.onmicrosoft.com'
+  Workspace_Principal_type:   'User'
+  Workspace_Access_type:      'Admin'
+  Pipeline_Admin_Access_to:   'admin@MngEnv789898.onmicrosoft.com'
+  Pipeline_Principal_Type:    'User'
+
+#===================================================================================# 
+#   Inster data required to connect to the Power BI Service.                        #
+#===================================================================================# 
+
+  APP_ID:                                    '36845664-cc38-4724-9c55-e4885deb3fa5'
+  TENANT_ID:                                 'caa99028-772e-42ef-b3ac-2e59fea599a2'
+  ServicePrincipalName:                      'PowerBIAdminApp'
+  #PublisherEmail:                            
+  AzureConnectionName:                       'PBI-ADMIN-SP-Power_BI_Deployment'
+  AzureKeyVaultName:                         'kv-sp'
+  AzureKeyVaultSecretName:                   'pbi-service-principal-secret'
+  # Needed to assign this SP's sec group tot the capacity admin list for the A SKU
+
+#===================================================================================# 
+#   Variables considering the Repo folder structure.                                #
+#===================================================================================# 
+
+  PBIX_Files_Path: '**/Reports/**/*.pbix'
+  PS_Scripts_Path: '**/PS_Scripts/*.ps1'
+
+#===================================================================================# 
+#   Customize these fields to change the workpace and deployment pipeline names.    #
+#===================================================================================# 
+
+  pbi_pipelinename: '$(projectname)-Pipeline'
+  wsdev: '$(projectname)-DEV'
+  wsprod: '$(projectname)-PROD'
+  wstest: '$(projectname)-TEST'
+
+#===================================================================================#  
+#   Customize the Stages below if there's a need to change the tasks order,         #
+#   add, remove or repeat certain tasks in each environment.                        #
+#===================================================================================#
+
+#===========================#
+#  STAGE 1: Deploy to DEV   #
+#===========================#
+
+stages:
+  - stage: 'deploy_to_Dev'
+    displayName: 'Deploy to Development Environment'
+    jobs:
+      - deployment: 'DeployToDev'
+        environment: 'Dev'
+        variables:
+          workspace: 'manual-dev-(wsdev)'
+          TargetStage: 0
+        strategy:
+         runOnce:
+           deploy:
+            steps:
+              - checkout: self
+
+# Steps before connecting to the Power BI Service. ====================#
+
+              - task: AzureKeyVault@2
+                displayName: 'Obtain Credentials from Azure Key Vault'
+                inputs:
+                  azureSubscription: $(AzureConnectionName)
+                  KeyVaultName: $(AzureKeyVaultName)
+                  SecretsFilter: $(AzureKeyVaultSecretName)
+                  RunAsPreJob: true
+
+              - task: CopyFiles@2
+                displayName: 'Copy PBIX from DEV'
+                inputs:
+                  SourceFolder: '$(Build.SourcesDirectory)'
+                  Contents: $(PBIX_Files_Path)
+                  TargetFolder: '$(Build.ArtifactStagingDirectory)'
+                  OverWrite: true
+
+              - task: CopyFiles@2
+                displayName: 'Copy Module ps1 scripts'
+                inputs:
+                  SourceFolder: '$(Build.SourcesDirectory)'
+                  Contents: $(PS_Scripts_Path)
+                  TargetFolder: '$(Build.ArtifactStagingDirectory)'
+                  OverWrite: true
+
+              - task: PowerShell@2
+                displayName: 'Install Power BI Management Modules'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.ArtifactStagingDirectory)/PS_Scripts/1 Install Modules.ps1'
+
+# Power BI Stage deployment steps. ====================================#
+
+              - task: PowerShell@2
+                displayName: 'Create Workspace'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.ArtifactStagingDirectory)/PS_Scripts/2 Create Workspace.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wsdev)'
+
+              - task: PowerShell@2
+                displayName: 'Set Workspace Access'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.ArtifactStagingDirectory)/PS_Scripts/3 Set Workspace Access.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wsdev) -Workspace_access_to $(Workspace_access_to) -Workspace_Principal_type $(Workspace_Principal_type) -Workspace_Access_type $(Workspace_Access_type) -ServicePrincipalName $(ServicePrincipalName)'
+
+              - task: PowerShell@2
+                displayName: 'Set Workspace to premium'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/4 Set Workspace to premium.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wsdev) -CapacityName $(capacityname)'
+
+              - task: PowerShell@2
+                displayName: 'Create deployment pipeline'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/5 Create deployment pipeline.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -pbi_pipelinename $(pbi_pipelinename)'
+
+              - task: PowerShell@2
+                displayName: 'Set Deployment Pipeline Access'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/6 Set Deployment Pipeline Access.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -pbi_pipelinename $(pbi_pipelinename)  -Pipeline_Admin_Access_to $(Pipeline_Admin_Access_to) -Pipeline_Principal_Type $(Pipeline_Principal_Type)'
+
+              - task: PowerShell@2
+                displayName: 'Set Workspace to Deployment Pipeline'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/7 Set Workspace to Deployment Pipeline.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wsdev) -capacityname $(capacityname) -pbi_pipelinename $(pbi_pipelinename) -TargetStage 0'
+
+              - task: PowerShell@2
+                displayName: 'Upload PBIX files'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/8 Upload PBIX files.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wsdev)'
+            
+#===========================#
+#  STAGE 2: Deploy to TEST  #
+#===========================#
+
+  - stage: 'deploy_to_Test'
+    displayName: 'Deploy to Test Environment'
+    jobs:
+      - deployment: 'DeployToTest'
+        environment: 'Test'
+        variables:
+          workspace: $(wstest)
+          TargetStage: 1
+          PreviousStage: 0
+        strategy:
+         runOnce:
+           deploy:
+            steps:
+              - checkout: self
+
+# Steps before connecting to the Power BI Service. ====================#
+
+              - task: AzureKeyVault@2
+                displayName: 'Obtain Credentials from Azure Key Vault'
+                inputs:
+                  azureSubscription: $(AzureConnectionName)
+                  KeyVaultName: $(AzureKeyVaultName)
+                  SecretsFilter: $(AzureKeyVaultSecretName)
+                  RunAsPreJob: true
+
+              - task: CopyFiles@2
+                displayName: 'Copy PBIX files for publishing.'
+                inputs:
+                  SourceFolder: '$(Build.SourcesDirectory)'
+                  Contents: '**/pbix/**/*.pbix'
+                  TargetFolder: '$(build.artifactstagingdirectory)'
+                  OverWrite: true
+
+              - task: CopyFiles@2
+                displayName: 'Copy Powershell scripts to Pipeline.'
+                inputs:
+                  SourceFolder: '$(Build.SourcesDirectory)'
+                  Contents: '**/PS_Scripts/*.ps1'
+                  TargetFolder: '$(build.artifactstagingdirectory)'
+                  OverWrite: true
+
+              - task: PowerShell@2
+                displayName: 'Install Power BI Management Modules'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/1 Install Modules.ps1'
+
+# Power BI Stage deployment steps. ====================================#
+
+              - task: PowerShell@2
+                displayName: 'Create Workspace'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.ArtifactStagingDirectory)/PS_Scripts/2 Create Workspace.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wstest)'
+
+              - task: PowerShell@2
+                displayName: 'Set Workspace Access'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.ArtifactStagingDirectory)/PS_Scripts/3 Set Workspace Access.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wstest) -Workspace_access_to $(Workspace_access_to) -Workspace_Principal_type $(Workspace_Principal_type) -Workspace_Access_type $(Workspace_Access_type) -ServicePrincipalName $(ServicePrincipalName)'
+
+              - task: PowerShell@2
+                displayName: 'Set Workspace to premium'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/4 Set Workspace to premium.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wstest) -CapacityName $(capacityname)'
+
+              - task: PowerShell@2
+                displayName: 'Set Workspace to Deployment Pipeline'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/7 Set Workspace to Deployment Pipeline.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wstest) -capacityname $(capacityname) -pbi_pipelinename $(pbi_pipelinename) -TargetStage 1'
+
+              - task: PowerShell@2
+                displayName: 'Trigger deploy all to next stage'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/9 Trigger deploy all to next stage.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -pbi_pipelinename $(pbi_pipelinename) -PreviousStage 0'
+
+              - task: PowerShell@2
+                displayName: 'Refresh new datasets'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/10 Refresh new datasets.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -pbi_pipelinename $(pbi_pipelinename) -PreviousStage 0'
+
+#===========================#
+#  STAGE 3: Deploy to PROD  #
+#===========================#
+
+  - stage: 'deploy_to_Production'
+    displayName: 'Deploy to Production Environment'
+    jobs:
+      - deployment: 'DeployToProd'
+        environment: 'Prod'
+        variables:
+          workspace: $(wsprod)
+          TargetStage: 2
+          PreviousStage: 1
+        strategy:
+         runOnce:
+           deploy:
+            steps:
+              - checkout: self
+
+# Steps before connecting to the Power BI Service. ====================#
+
+              - task: AzureKeyVault@2
+                displayName: 'Obtain Credentials from Azure Key Vault'
+                inputs:
+                  azureSubscription: $(AzureConnectionName)
+                  KeyVaultName: $(AzureKeyVaultName)
+                  SecretsFilter: $(AzureKeyVaultSecretName)
+                  RunAsPreJob: true
+
+              - task: CopyFiles@2
+                displayName: 'Copy PBIX files for publishing.'
+                inputs:
+                  SourceFolder: '$(Build.SourcesDirectory)'
+                  Contents: '**/pbix/**/*.pbix'
+                  TargetFolder: '$(build.artifactstagingdirectory)'
+                  OverWrite: true
+
+              - task: CopyFiles@2
+                displayName: 'Copy Powershell scripts to Pipeline.'
+                inputs:
+                  SourceFolder: '$(Build.SourcesDirectory)'
+                  Contents: '**/PS_Scripts/*.ps1'
+                  TargetFolder: '$(build.artifactstagingdirectory)'
+                  OverWrite: true
+
+              - task: PowerShell@2
+                displayName: 'Install Power BI Management Modules'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/1 Install Modules.ps1'
+
+# Power BI Stage deployment steps. ====================================#
+
+              - task: PowerShell@2
+                displayName: 'Create Workspace'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.ArtifactStagingDirectory)/PS_Scripts/2 Create Workspace.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wsprod)'
+
+              - task: PowerShell@2
+                displayName: 'Set Workspace Access'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.ArtifactStagingDirectory)/PS_Scripts/3 Set Workspace Access.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wsprod) -Workspace_access_to $(Workspace_access_to) -Workspace_Principal_type $(Workspace_Principal_type) -Workspace_Access_type $(Workspace_Access_type) -ServicePrincipalName $(ServicePrincipalName)'
+
+              - task: PowerShell@2
+                displayName: 'Set Workspace to premium'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/4 Set Workspace to premium.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wsprod) -CapacityName $(capacityname)'
+
+              - task: PowerShell@2
+                displayName: 'Set Workspace to Deployment Pipeline'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/7 Set Workspace to Deployment Pipeline.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -workspace_name $(wsprod) -capacityname $(capacityname) -pbi_pipelinename $(pbi_pipelinename) -TargetStage 2'
+
+              - task: PowerShell@2
+                displayName: 'Trigger deploy all to next stage'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/9 Trigger deploy all to next stage.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -pbi_pipelinename $(pbi_pipelinename) -PreviousStage 1'
+
+              - task: PowerShell@2
+                displayName: 'Refresh new datasets'
+                inputs:
+                  targetType: filePath
+                  filePath: '$(Build.artifactstagingdirectory)/PS_Scripts/10 Refresh new datasets.ps1'
+                  arguments: '-AKVSecret $(${{ variables.AzureKeyVaultSecretName }}) -pbi_pipelinename $(pbi_pipelinename) -PreviousStage 1'
